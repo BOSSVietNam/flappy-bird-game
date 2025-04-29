@@ -1,0 +1,449 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script>```html
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Flappy Bird game được tạo bởi Lê Quang Linh, sử dụng HTML Canvas.">
+    <meta name="keywords" content="Flappy Bird, HTML5 game, Canvas game, Lê Quang Linh">
+    <meta name="author" content="Lê Quang Linh">
+    <title>Flappy Bird - Lê Quang Linh</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f0f0f0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            border: 2px solid #333;
+            background-color: #87CEEB;
+        }
+        #controls {
+            margin-top: 10px;
+            text-align: center;
+        }
+        select, button {
+            padding: 5px;
+            margin: 5px;
+            font-size: 16px;
+        }
+        #leaderboard {
+            margin-top: 10px;
+            background: #fff;
+            padding: 10px;
+            border: 1px solid #333;
+            max-width: 300px;
+            text-align: left;
+        }
+        #leaderboard h3 {
+            margin: 0 0 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="400" height="600"></canvas>
+    <div id="controls">
+        <select id="skinSelect">
+            <option value="circle">Chim tròn</option>
+            <option value="square">Chim vuông</option>
+            <option value="triangle">Chim tam giác</option>
+        </select>
+        <select id="birdColorSelect">
+            <option value="#FFD700">Vàng</option>
+            <option value="#FF4500">Cam</option>
+            <option value="#00CED1">Xanh lam</option>
+            <option value="#FF69B4">Hồng</option>
+        </select>
+        <select id="themeSelect">
+            <option value="day">Ban ngày</option>
+            <option value="night">Ban đêm</option>
+            <option value="sunset">Hoàng hôn</option>
+        </select>
+        <select id="difficultySelect">
+            <option value="normal">Bình thường</option>
+            <option value="hard">Khó</option>
+        </select>
+        <button id="resetLeaderboard">Xóa bảng xếp hạng</button>
+    </div>
+    <div id="leaderboard">
+        <h3>Bảng xếp hạng</h3>
+        <div id="leaderboardList"></div>
+    </div>
+    <script>
+        // Lấy canvas và context
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Đối tượng game
+        const game = {
+            state: 'start',
+            score: 0,
+            gravity: 0.5,
+            flap: -10,
+            pipeSpeed: 2,
+            pipeGap: 150,
+            pipeFrequency: 90,
+            frame: 0,
+            wind: 0,
+            shake: 0,
+            shakeDuration: 0,
+            difficulty: 'normal',
+            skin: 'circle',
+            theme: 'day',
+            birdColor: '#FFD700',
+            creator: 'Lê Quang Linh'
+        };
+
+        // Đối tượng chim
+        const bird = {
+            x: 100,
+            y: canvas.height / 2,
+            velocity: 0,
+            radius: 20,
+            angle: 0
+        };
+
+        // Mảng chứa các cặp ống cống
+        const pipes = [];
+
+        // Đối tượng mặt đất
+        const ground = {
+            y: canvas.height - 50,
+            height: 50,
+            xOffset: 0
+        };
+
+        // Bảng xếp hạng
+        let leaderboard = JSON.parse(localStorage.getItem('flappyBirdLeaderboard')) || [];
+
+        // Chủ đề màu sắc
+        const themes = {
+            day: {
+                sky: ['#87CEEB', '#E0FFFF'],
+                ground: '#228B22',
+                groundPattern: '#006400',
+                pipe: '#006400',
+                text: '#000'
+            },
+            night: {
+                sky: ['#191970', '#483D8B'],
+                ground: '#2F4F4F',
+                groundPattern: '#1C2526',
+                pipe: '#2F4F4F',
+                text: '#FFF'
+            },
+            sunset: {
+                sky: ['#FF4500', '#FFD700'],
+                ground: '#8B4513',
+                groundPattern: '#5C4033',
+                pipe: '#8B4513',
+                text: '#FFF'
+            }
+        };
+
+        // Xử lý đầu vào
+        function handleInput() {
+            if (game.state === 'start') {
+                game.state = 'playing';
+                bird.velocity = game.flap;
+            } else if (game.state === 'playing') {
+                bird.velocity = game.flap;
+            } else if (game.state === 'gameover') {
+                // Lưu điểm vào bảng xếp hạng
+                leaderboard.push(game.score);
+                leaderboard.sort((a, b) => b - a);
+                leaderboard = leaderboard.slice(0, 5);
+                localStorage.setItem('flappyBirdLeaderboard', JSON.stringify(leaderboard));
+                updateLeaderboard();
+                // Reset game
+                game.state = 'start';
+                game.score = 0;
+                game.frame = 0;
+                bird.y = canvas.height / 2;
+                bird.velocity = 0;
+                bird.angle = 0;
+                pipes.length = 0;
+                ground.xOffset = 0;
+                game.shake = 0;
+                game.shakeDuration = 0;
+            }
+        }
+
+        // Sự kiện đầu vào
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') handleInput();
+        });
+        canvas.addEventListener('click', handleInput);
+        canvas.addEventListener('touchstart', handleInput);
+
+        // Xử lý chọn skin, màu chim, chủ đề, độ khó
+        document.getElementById('skinSelect').addEventListener('change', (e) => {
+            game.skin = e.target.value;
+        });
+        document.getElementById('birdColorSelect').addEventListener('change', (e) => {
+            game.birdColor = e.target.value;
+        });
+        document.getElementById('themeSelect').addEventListener('change', (e) => {
+            game.theme = e.target.value;
+        });
+        document.getElementById('difficultySelect').addEventListener('change', (e) => {
+            game.difficulty = e.target.value;
+            game.pipeSpeed = game.difficulty === 'hard' ? 3 : 2;
+            game.pipeGap = game.difficulty === 'hard' ? 120 : 150;
+            game.pipeFrequency = game.difficulty === 'hard' ? 75 : 90;
+        });
+        document.getElementById('resetLeaderboard').addEventListener('click', () => {
+            leaderboard = [];
+            localStorage.setItem('flappyBirdLeaderboard', JSON.stringify(leaderboard));
+            updateLeaderboard();
+        });
+
+        // Cập nhật bảng xếp hạng
+        function updateLeaderboard() {
+            const list = document.getElementById('leaderboardList');
+            list.innerHTML = leaderboard.length ? 
+                leaderboard.map((score, i) => `<p>${i + 1}. ${score}</p>`).join('') : 
+                '<p>Chưa có điểm số!</p>';
+        }
+
+        // Tạo ống cống mới
+        function createPipe() {
+            const minHeight = 100;
+            const maxHeight = canvas.height - ground.height - game.pipeGap - minHeight;
+            const topHeight = minHeight + Math.random() * (maxHeight - minHeight);
+            pipes.push({
+                x: canvas.width,
+                topHeight: topHeight,
+                bottomY: topHeight + game.pipeGap,
+                scored: false
+            });
+        }
+
+        // Vẽ nền
+        function drawBackground() {
+            const theme = themes[game.theme];
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, theme.sky[0]);
+            gradient.addColorStop(1, theme.sky[1]);
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // Vẽ mặt đất
+        function drawGround() {
+            const theme = themes[game.theme];
+            ctx.fillStyle = theme.ground;
+            ctx.fillRect(0, ground.y, canvas.width, ground.height);
+            ctx.fillStyle = theme.groundPattern;
+            for (let x = 0; x < canvas.width; x += 20) {
+                ctx.fillRect(x + ground.xOffset % 20, ground.y, 10, ground.height);
+            }
+        }
+
+        // Vẽ chim
+        function drawBird() {
+            ctx.save();
+            ctx.translate(bird.x, bird.y);
+            ctx.rotate(bird.angle);
+            ctx.fillStyle = game.birdColor;
+            if (game.skin === 'circle') {
+                ctx.beginPath();
+                ctx.arc(0, 0, bird.radius, 0, Math.PI * 2);
+                ctx.fill();
+            } else if (game.skin === 'square') {
+                ctx.fillRect(-bird.radius, -bird.radius, bird.radius * 2, bird.radius * 2);
+            } else if (game.skin === 'triangle') {
+                ctx.beginPath();
+                ctx.moveTo(0, -bird.radius);
+                ctx.lineTo(bird.radius, bird.radius);
+                ctx.lineTo(-bird.radius, bird.radius);
+                ctx.closePath();
+                ctx.fill();
+            }
+            // Vẽ mắt
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(bird.radius * 0.5, -bird.radius * 0.3, bird.radius * 0.2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // Vẽ ống cống
+        function drawPipes() {
+            ctx.fillStyle = themes[game.theme].pipe;
+            pipes.forEach(pipe => {
+                ctx.fillRect(pipe.x, 0, 50, pipe.topHeight);
+                ctx.fillRect(pipe.x, pipe.bottomY, 50, canvas.height - pipe.bottomY);
+            });
+        }
+
+        // Vẽ văn bản
+        function drawText() {
+            ctx.font = '30px Arial';
+            ctx.fillStyle = themes[game.theme].text;
+            ctx.textAlign = 'center';
+            if (game.state === 'start') {
+                ctx.fillText('Nhấn Space/Click để chơi', canvas.width / 2, canvas.height / 2);
+                ctx.font = '20px Arial';
+                ctx.fillText(`Tạo bởi: ${game.creator}`, canvas.width / 2, canvas.height / 2 + 50);
+            } else if (game.state === 'playing') {
+                ctx.fillText(game.score, canvas.width / 2, 50);
+            } else if (game.state === 'gameover') {
+                ctx.fillText('Game Over', canvas.width / 2, canvas.height / 2 - 50);
+                ctx.fillText(`Điểm: ${game.score}`, canvas.width / 2, canvas.height / 2);
+                ctx.fillText('Nhấn Space/Click để chơi lại', canvas.width / 2, canvas.height / 2 + 50);
+            }
+        }
+
+        // Cập nhật trạng thái game
+        function update() {
+            if (game.state !== 'playing') return;
+
+            // Hiệu ứng gió
+            if (game.difficulty === 'hard') {
+                game.wind = Math.sin(game.frame / 50) * 0.2;
+                bird.x += game.wind;
+            }
+
+            // Cập nhật chim
+            bird.velocity += game.gravity;
+            bird.y += bird.velocity;
+            bird.angle = Math.min(Math.PI / 4, Math.max(-Math.PI / 4, bird.velocity * 0.05));
+
+            // Giới hạn vị trí chim
+            bird.x = Math.max(bird.radius, Math.min(canvas.width - bird.radius, bird.x));
+
+            // Cập nhật mặt đất
+            ground.xOffset -= game.pipeSpeed;
+            if (ground.xOffset <= -20) ground.xOffset = 0;
+
+            // Tạo ống cống
+            if (game.frame % game.pipeFrequency === 0) {
+                createPipe();
+            }
+
+            // Cập nhật ống cống
+            pipes.forEach(pipe => {
+                pipe.x -= game.pipeSpeed;
+            });
+
+            // Xóa ống cống ra khỏi màn hình
+            if (pipes.length && pipes[0].x < -50) {
+                pipes.shift();
+            }
+
+            // Kiểm tra va chạm
+            if (bird.y + bird.radius > ground.y || bird.y - bird.radius < 0) {
+                game.state = 'gameover';
+                game.shake = 15;
+                game.shakeDuration = 20;
+                return;
+            }
+
+            for (let pipe of pipes) {
+                if (
+                    bird.x + bird.radius > pipe.x &&
+                    bird.x - bird.radius < pipe.x + 50 &&
+                    (bird.y - bird.radius < pipe.topHeight || bird.y + bird.radius > pipe.bottomY)
+                ) {
+                    game.state = 'gameover';
+                    game.shake = 15;
+                    game.shakeDuration = 20;
+                    return;
+                }
+
+                // Tính điểm
+                if (!pipe.scored && bird.x > pipe.x + 50) {
+                    game.score++;
+                    pipe.scored = true;
+                }
+            }
+
+            game.frame++;
+        }
+
+        // Vòng lặp game
+        function gameLoop() {
+            // Hiệu ứng rung màn hình
+            ctx.save();
+            if (game.shake > 0 && game.shakeDuration > 0) {
+                const offsetX = (Math.random() - 0.5) * game.shake;
+                const offsetY = (Math.random() - 0.5) * game.shake;
+                ctx.translate(offsetX, offsetY);
+                game.shake *= 0.9;
+                game.shakeDuration--;
+            }
+
+            // Xóa canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Vẽ các thành phần
+            drawBackground();
+            drawPipes();
+            drawGround();
+            drawBird();
+            drawText();
+
+            ctx.restore();
+
+            // Cập nhật
+            update();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Khởi tạo bảng xếp hạng
+        updateLeaderboard();
+
+        // Bắt đầu game
+        gameLoop();
+    </script>
+</body>
+</html>
+```
